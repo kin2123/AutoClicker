@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-轻量鼠标连点器 Auto Clicker v1.2(开源免费)
+轻量鼠标连点器 Auto Clicker v1.4(开源免费)
 界面:主窗口只保留高频参数,高级功能收进顶部菜单
 功能:
 - 全局热键启停,热键可自定义(设置 → 热键设置)
@@ -9,7 +9,7 @@
 - 位置:跟随鼠标 / 固定坐标 / 多点循环(位置 → 点击位置)
 - 次数限制、倒计时启动(设置 → 高级选项)
 - 配置自动保存与恢复、系统托盘、高精度计时、DPI 感知
-运行:pip install pynput pystray pillow && python auto_clicker.py
+运行:pip install pynput && python auto_clicker.py
 """
 import ctypes
 import json
@@ -23,15 +23,10 @@ from tkinter import ttk, messagebox
 
 from pynput import mouse, keyboard
 
-try:
-    import pystray
-    from PIL import Image
-    TRAY_OK = True
-except Exception:      # 缺依赖时自动降级:关闭窗口即退出
-    TRAY_OK = False
+TRAY_OK = True          # 托盘用 Win32 原生 API 实现,不再依赖 pystray / Pillow
 
 APP_TITLE = "轻量连点器 Auto Clicker"
-APP_VERSION = "v1.2"
+APP_VERSION = "v1.4"
 APP_ID = "AutoClicker.MouseTool.1"
 GREEN = "#0a7d32"
 AMBER = "#c47f00"
@@ -253,6 +248,199 @@ class HotkeyManager:
         listener.start()
 
 
+WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, ctypes.c_void_p, ctypes.c_uint,
+                             ctypes.c_size_t, ctypes.c_ssize_t)
+
+
+class NativeTray:
+    """系统托盘:直接调 Win32 Shell_NotifyIcon,替代 pystray + Pillow。
+
+    pystray 会带进 Pillow(约 11MB),Pillow 又连带 OpenSSL(约 10MB),
+    而托盘图标只需要一个 HICON,用 LoadImage 从 ico 直接加载即可。
+    """
+
+    NIM_ADD, NIM_MODIFY, NIM_DELETE = 0, 1, 2
+    NIF_MESSAGE, NIF_ICON, NIF_TIP = 0x1, 0x2, 0x4
+    WM_APP = 0x8000
+    WM_TRAY = WM_APP + 1
+    WM_LBUTTONDBLCLK, WM_RBUTTONUP = 0x0203, 0x0205
+    WM_COMMAND, WM_CLOSE, WM_DESTROY = 0x0111, 0x0010, 0x0002
+    ID_SHOW, ID_TOGGLE, ID_EXIT = 2001, 2002, 2003
+    MF_STRING, MF_SEPARATOR = 0x0, 0x800
+    IMAGE_ICON = 1
+    LR_LOADFROMFILE, LR_DEFAULTSIZE = 0x0010, 0x0040
+    TPM_RIGHTBUTTON, TPM_RETURNCMD = 0x0002, 0x0100
+
+    class NOTIFYICONDATAW(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", ctypes.c_ulong), ("hWnd", ctypes.c_void_p),
+            ("uID", ctypes.c_uint), ("uFlags", ctypes.c_uint),
+            ("uCallbackMessage", ctypes.c_uint), ("hIcon", ctypes.c_void_p),
+            ("szTip", ctypes.c_wchar * 128), ("dwState", ctypes.c_ulong),
+            ("dwStateMask", ctypes.c_ulong), ("szInfo", ctypes.c_wchar * 256),
+            ("uVersion", ctypes.c_uint), ("szInfoTitle", ctypes.c_wchar * 64),
+            ("dwInfoFlags", ctypes.c_ulong), ("guidItem", ctypes.c_byte * 16),
+            ("hBalloonIcon", ctypes.c_void_p),
+        ]
+
+    class WNDCLASSEXW(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", ctypes.c_uint), ("style", ctypes.c_uint),
+            ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int),
+            ("cbWndExtra", ctypes.c_int), ("hInstance", ctypes.c_void_p),
+            ("hIcon", ctypes.c_void_p), ("hCursor", ctypes.c_void_p),
+            ("hbrBackground", ctypes.c_void_p), ("lpszMenuName", ctypes.c_wchar_p),
+            ("lpszClassName", ctypes.c_wchar_p), ("hIconSm", ctypes.c_void_p),
+        ]
+
+    class MSG(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", ctypes.c_void_p), ("message", ctypes.c_uint),
+            ("wParam", ctypes.c_size_t), ("lParam", ctypes.c_ssize_t),
+            ("time", ctypes.c_ulong), ("pt", ctypes.c_long * 2),
+        ]
+
+    class POINT(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+    def __init__(self, tip, icon_path, on_show, on_toggle, on_quit):
+        self.tip = tip
+        self.icon_path = icon_path
+        self.on_show, self.on_toggle, self.on_quit = on_show, on_toggle, on_quit
+        self._hwnd = None
+        self._hicon = None
+        self._ready = threading.Event()
+
+    # ---------- 对外接口 ----------
+
+    def start(self):
+        threading.Thread(target=self._run, daemon=True).start()
+        self._ready.wait(3)
+        return self._hwnd is not None
+
+    def set_tip(self, text):
+        self.tip = text[:127]
+        if self._hwnd:
+            ctypes.windll.user32.PostMessageW(self._hwnd, self.WM_APP + 2, 0, 0)
+
+    def stop(self):
+        if self._hwnd:
+            ctypes.windll.user32.PostMessageW(self._hwnd, self.WM_CLOSE, 0, 0)
+
+    # ---------- 内部实现 ----------
+
+    def _run(self):
+        u = ctypes.windll.user32
+        shell = ctypes.windll.shell32
+        u.LoadImageW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint,
+                                 ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+        u.LoadImageW.restype = ctypes.c_void_p
+        shell.Shell_NotifyIconW.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+        # 必须显式声明 64 位参数类型,否则 ctypes 默认按 32 位 c_int 转换,LPARAM 会溢出报错
+        u.DefWindowProcW.argtypes = [ctypes.c_void_p, ctypes.c_uint,
+                                     ctypes.c_size_t, ctypes.c_ssize_t]
+        u.DefWindowProcW.restype = ctypes.c_longlong
+        u.PostMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint,
+                                   ctypes.c_size_t, ctypes.c_ssize_t]
+        u.GetMessageW.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                  ctypes.c_uint, ctypes.c_uint]
+
+        self._cb = WNDPROC(self._wnd_proc)
+
+        cls_name = "AutoClickerTrayWindow"
+        wcex = self.WNDCLASSEXW()
+        wcex.cbSize = ctypes.sizeof(wcex)
+        wcex.lpfnWndProc = self._cb
+        wcex.lpszClassName = cls_name
+        u.RegisterClassExW(ctypes.byref(wcex))
+
+        hwnd = u.CreateWindowExW(0, cls_name, "", 0, 0, 0, 0, 0,
+                                 ctypes.c_void_p(-3), None, None, None)  # HWND_MESSAGE
+        if not hwnd:
+            self._ready.set()
+            return
+        self._hwnd = hwnd
+
+        self._hicon = u.LoadImageW(None, self.icon_path, self.IMAGE_ICON, 16, 16,
+                                   self.LR_LOADFROMFILE | self.LR_DEFAULTSIZE)
+        self._add_icon(shell)
+        self._ready.set()
+
+        msg = self.MSG()
+        while u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            u.TranslateMessage(ctypes.byref(msg))
+            u.DispatchMessageW(ctypes.byref(msg))
+
+    def _add_icon(self, shell, modify=False):
+        nid = self.NOTIFYICONDATAW()
+        nid.cbSize = ctypes.sizeof(nid)
+        nid.hWnd = self._hwnd
+        nid.uID = 1
+        nid.uFlags = self.NIF_MESSAGE | self.NIF_ICON | self.NIF_TIP
+        nid.uCallbackMessage = self.WM_TRAY
+        nid.hIcon = self._hicon
+        nid.szTip = self.tip[:127]
+        shell.Shell_NotifyIconW(self.NIM_MODIFY if modify else self.NIM_ADD,
+                                ctypes.byref(nid))
+
+    def _wnd_proc(self, hwnd, msg, wparam, lparam):
+        u = ctypes.windll.user32
+        # LPARAM 在 Python 里是无符号传入的,超出 int64 正数范围时转成有符号,避免 ctypes 报错
+        if lparam >= (1 << 63):
+            lparam -= (1 << 64)
+        if msg == self.WM_TRAY:
+            if lparam == self.WM_LBUTTONDBLCLK:
+                self.on_show()
+                return 0
+            if lparam == self.WM_RBUTTONUP:
+                self._popup_menu(hwnd)
+                return 0
+        elif msg == self.WM_COMMAND:
+            cmd = wparam & 0xFFFF
+            if cmd == self.ID_SHOW:
+                self.on_show()
+            elif cmd == self.ID_TOGGLE:
+                self.on_toggle()
+            elif cmd == self.ID_EXIT:
+                self.on_quit()
+            return 0
+        elif msg == self.WM_APP + 2:
+            self._add_icon(ctypes.windll.shell32, modify=True)
+            return 0
+        elif msg == self.WM_CLOSE:
+            u.DestroyWindow(hwnd)
+            return 0
+        elif msg == self.WM_DESTROY:
+            nid = self.NOTIFYICONDATAW()
+            nid.cbSize = ctypes.sizeof(nid)
+            nid.hWnd = hwnd
+            nid.uID = 1
+            ctypes.windll.shell32.Shell_NotifyIconW(self.NIM_DELETE, ctypes.byref(nid))
+            u.PostQuitMessage(0)
+            return 0
+        return u.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+    def _popup_menu(self, hwnd):
+        u = ctypes.windll.user32
+        u.AppendMenuW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t,
+                                  ctypes.c_wchar_p]
+        u.TrackPopupMenu.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int,
+                                     ctypes.c_int, ctypes.c_int, ctypes.c_void_p,
+                                     ctypes.c_void_p]
+        hmenu = u.CreatePopupMenu()
+        u.AppendMenuW(hmenu, self.MF_STRING, self.ID_SHOW, "显示窗口")
+        u.AppendMenuW(hmenu, self.MF_STRING, self.ID_TOGGLE, "启动 / 停止")
+        u.AppendMenuW(hmenu, self.MF_SEPARATOR, 0, None)
+        u.AppendMenuW(hmenu, self.MF_STRING, self.ID_EXIT, "退出")
+        pt = self.POINT()
+        u.GetCursorPos(ctypes.byref(pt))
+        u.SetForegroundWindow(hwnd)
+        cmd = u.TrackPopupMenu(hmenu, self.TPM_RIGHTBUTTON | self.TPM_RETURNCMD,
+                               pt.x, pt.y, 0, hwnd, None)
+        u.PostMessageW(hwnd, self.WM_COMMAND, cmd, 0)
+        u.DestroyMenu(hmenu)
+
+
 class App:
     """主窗口:只有高频参数;高级功能在菜单里"""
 
@@ -262,6 +450,7 @@ class App:
         self.tray = None
         self._picked = None
         self._capturing = False
+        self._last_tip = ""
 
         try:
             dpi = root.winfo_fpixels("1i")
@@ -704,19 +893,17 @@ class App:
     # ---------------- 托盘 ----------------
 
     def _setup_tray(self):
+        """托盘:完全走 Win32 API,不需要 pystray / Pillow"""
         try:
-            try:
-                img = Image.open(resource_path("app.ico"))
-            except Exception:
-                img = Image.new("RGBA", (64, 64), (30, 58, 95, 255))
-            menu = pystray.Menu(
-                pystray.MenuItem("显示窗口", lambda: self.root.after(0, self.show_window),
-                                 default=True),
-                pystray.MenuItem("启动 / 停止", lambda: self.root.after(0, self.toggle)),
-                pystray.MenuItem("退出", lambda: self.root.after(0, self.quit_app)),
+            self.tray = NativeTray(
+                APP_TITLE,
+                resource_path("app.ico"),
+                lambda: self.root.after(0, self.show_window),
+                lambda: self.root.after(0, self.toggle),
+                lambda: self.root.after(0, self.quit_app),
             )
-            self.tray = pystray.Icon("AutoClicker", img, APP_TITLE, menu)
-            threading.Thread(target=self.tray.run, daemon=True).start()
+            if not self.tray.start():
+                self.tray = None
         except Exception:
             self.tray = None
 
@@ -780,6 +967,10 @@ class App:
                 text=("停止" if c.running.is_set() else "启动")
                      + f"({combo_to_display(c.hotkey)})")
         self.var_count.set(f"已点击:{c.count} 次")
+        tip = f"{APP_TITLE} · {self.var_state.get()}"
+        if self.tray and tip != self._last_tip:     # 状态变化时同步托盘提示
+            self._last_tip = tip
+            self.tray.set_tip(tip)
         self.root.after(100, self._poll)
 
 

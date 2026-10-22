@@ -35,8 +35,8 @@
 |---|---|---|---|
 | `AutoClicker-Minimal.exe` | C + Win32 | ≈50 KB | 极致简约,打开就用 |
 | `AutoClicker-Pro.exe` | C# WPF (.NET 4.8) | <1 MB | 精美界面,全功能 |
-| `AutoClicker.exe` | Python + Tkinter | ≈18 MB | 功能最全的经典版 |
-| `AutoClicker-portable.zip` | Python 文件夹版 | ≈18 MB | 启动更快的经典版 |
+| `AutoClicker.exe` | Python + Tkinter | ≈11 MB | 功能最全的经典版 |
+| `AutoClicker-portable.zip` | Python 文件夹版 | ≈11 MB | 启动更快的经典版 |
 
 ### Minimal(极简版)
 
@@ -55,7 +55,7 @@
 ## 从源码运行
 
 ```bash
-pip install pynput pystray pillow
+pip install pynput
 python auto_clicker.py
 ```
 

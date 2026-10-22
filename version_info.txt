@@ -1,8 +1,8 @@
 # UTF-8
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 2, 0, 0),
-    prodvers=(1, 2, 0, 0),
+    filevers=(1, 4, 0, 0),
+    prodvers=(1, 4, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -16,12 +16,12 @@ VSVersionInfo(
         '080404b0',
         [StringStruct('CompanyName', 'kin2123'),
          StringStruct('FileDescription', 'AutoClicker 轻量鼠标连点器'),
-         StringStruct('FileVersion', '1.2.0.0'),
+         StringStruct('FileVersion', '1.4.0.0'),
          StringStruct('InternalName', 'AutoClicker'),
          StringStruct('LegalCopyright', 'MIT License'),
          StringStruct('OriginalFilename', 'AutoClicker.exe'),
          StringStruct('ProductName', 'AutoClicker'),
-         StringStruct('ProductVersion', '1.2.0.0')])
+         StringStruct('ProductVersion', '1.4.0.0')])
     ]),
     VarFileInfo([VarStruct('Translation', [2052, 1200])])
   ]
