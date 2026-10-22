@@ -18,3 +18,6 @@ desktop.ini
 
 # 运行时配置
 .auto_clicker.json
+
+# WorkBuddy 工作目录
+.workbuddy/

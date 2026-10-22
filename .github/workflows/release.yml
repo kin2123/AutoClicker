@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pynput pystray pillow pyinstaller
+
+      - name: Build (onefile)
+        run: |
+          pyinstaller --noconfirm --onefile --noconsole --icon app.ico `
+            --add-data "app.ico;." --version-file version_info.txt `
+            --name AutoClicker --distpath dist/onefile --workpath build/onefile `
+            auto_clicker.py
+
+      - name: Build (onedir)
+        run: |
+          pyinstaller --noconfirm --noconsole --icon app.ico `
+            --add-data "app.ico;." --version-file version_info.txt `
+            --name AutoClicker --distpath dist/onedir --workpath build/onedir `
+            auto_clicker.py
+
+      - name: Package portable zip
+        run: |
+          Compress-Archive -Path dist/onedir/AutoClicker `
+            -DestinationPath dist/AutoClicker-portable.zip -CompressionLevel Optimal -Force
+
+      - name: Show artifacts
+        run: |
+          Get-ChildItem dist -Recurse -Filter *.exe | Select-Object FullName, Length
+          Get-ChildItem dist/*.zip | Select-Object FullName, Length
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: AutoClicker ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          body: |
+            ## 轻量连点器 AutoClicker ${{ github.ref_name }}
+
+            开源免费的 Windows 鼠标连点工具。单文件、无广告、界面简洁，全局热键一键启停。
+
+            ### 下载
+
+            | 文件 | 说明 |
+            |---|---|
+            | `AutoClicker.exe` | 单文件免安装版，双击即用（启动需解压，约慢 1~2 秒） |
+            | `AutoClicker-portable.zip` | 文件夹版，解压后运行 `AutoClicker.exe`，启动更快，适合常驻使用 |
+
+            要求：Windows 10 / 11（64 位），由 GitHub Actions 自动编译。
+
+            ### 功能
+
+            - 全局热键启停，热键可自定义（默认 `F6`）
+            - 点击间隔 1ms ~ 60s，支持随机浮动 ±N%
+            - 左键 / 右键 / 中键，支持单击 / 双击 / 按住模式
+            - 位置模式：跟随鼠标 / 固定坐标 / 多点循环
+            - 可设点击总次数，到数自动停止
+            - 倒计时启动、配置自动保存、系统托盘、窗口置顶
+            - 高精度计时（Windows 定时器精度 1ms + 忙等待校准）
+
+            ### 注意
+
+            PyInstaller 打包的 exe 可能被杀毒软件误报，加入白名单即可；介意的话可用文件夹版或直接从源码运行。
+
+            本工具仅用于个人合法的重复性操作辅助（如软件测试、表单填写、数据录入等）。请遵守目标软件/平台的服务条款，不要用于游戏作弊或违反规则与法律的场景。
+          files: |
+            dist/onefile/AutoClicker.exe
+            dist/AutoClicker-portable.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -29,7 +29,7 @@
 
 ## 下载
 
-Releases 提供两个版本:
+前往 [**Releases**](https://github.com/kin2123/AutoClicker/releases/latest) 页面下载(由 GitHub Actions 自动编译,免安装):
 
 | 版本 | 说明 |
 |---|---|
@@ -51,9 +51,15 @@ python auto_clicker.py
 pip install pyinstaller
 python make_icon.py          # 生成 app.ico
 # 单文件版
-pyinstaller --onefile --noconsole --icon app.ico --add-data "app.ico;." --name AutoClicker auto_clicker.py
+pyinstaller --onefile --noconsole --icon app.ico --add-data "app.ico;." --version-file version_info.txt --name AutoClicker auto_clicker.py
 # 文件夹版(启动更快)
-pyinstaller --noconsole --icon app.ico --add-data "app.ico;." --name AutoClicker auto_clicker.py
+pyinstaller --noconsole --icon app.ico --add-data "app.ico;." --version-file version_info.txt --name AutoClicker auto_clicker.py
+```
+
+也可以直接推 tag,GitHub Actions 会自动编译并发布 Release(见 `.github/workflows/release.yml`):
+
+```bash
+git tag v1.3 && git push origin v1.3
 ```
 
 ## 使用说明
