@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: windows-latest
 
     steps:
@@ -22,34 +22,49 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pynput pystray pillow pyinstaller
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
 
-      - name: Build (onefile)
+      # ---------- 完整版（Python + PyInstaller）----------
+      - name: Build Python (onefile)
         run: |
+          pip install pynput pystray pillow pyinstaller
           pyinstaller --noconfirm --onefile --noconsole --icon app.ico `
             --add-data "app.ico;." --version-file version_info.txt `
             --name AutoClicker --distpath dist/onefile --workpath build/onefile `
             auto_clicker.py
 
-      - name: Build (onedir)
+      - name: Build Python (onedir + zip)
         run: |
           pyinstaller --noconfirm --noconsole --icon app.ico `
             --add-data "app.ico;." --version-file version_info.txt `
             --name AutoClicker --distpath dist/onedir --workpath build/onedir `
             auto_clicker.py
-
-      - name: Package portable zip
-        run: |
           Compress-Archive -Path dist/onedir/AutoClicker `
             -DestinationPath dist/AutoClicker-portable.zip -CompressionLevel Optimal -Force
 
-      - name: Show artifacts
+      # ---------- 极简版（C + Win32, MinGW）----------
+      - name: Build Minimal (C)
+        shell: pwsh
         run: |
-          Get-ChildItem dist -Recurse -Filter *.exe | Select-Object FullName, Length
-          Get-ChildItem dist/*.zip | Select-Object FullName, Length
+          $env:Path = "C:\msys64\mingw64\bin;" + $env:Path
+          gcc --version | Select-Object -First 1
+          windres apps/minimal/app.rc -O coff -o apps/minimal/res.o
+          gcc -O2 -s -mwindows -municode -o dist/AutoClicker-Minimal.exe `
+            apps/minimal/main.c apps/minimal/res.o -lshell32 -lwinmm
+
+      # ---------- 精美版（C# WPF, .NET Framework 4.8）----------
+      - name: Build Elegant (WPF)
+        run: |
+          dotnet build apps/elegant -c Release
+          Copy-Item apps/elegant/bin/Release/net48/AutoClicker-Pro.exe dist/AutoClicker-Pro.exe
+
+      - name: Show artifacts
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File -Recurse | Select-Object FullName, Length
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
@@ -62,34 +77,33 @@ jobs:
           body: |
             ## 轻量连点器 AutoClicker ${{ github.ref_name }}
 
-            开源免费的 Windows 鼠标连点工具。单文件、无广告、界面简洁，全局热键一键启停。
+            开源免费的 Windows 鼠标连点工具，同一个仓库提供三种口味：
 
-            ### 下载
+            | 文件 | 版本 | 体积 | 适合 |
+            |---|---|---|---|
+            | `AutoClicker-Minimal.exe` | C + Win32 | ≈50 KB | 极致简约，打开就用 |
+            | `AutoClicker-Pro.exe` | C# WPF (.NET 4.8) | <1 MB | 精美界面，全功能 |
+            | `AutoClicker.exe` | Python + Tkinter | ≈18 MB | 功能最全的经典版 |
+            | `AutoClicker-portable.zip` | Python 文件夹版 | ≈18 MB | 启动更快的经典版 |
 
-            | 文件 | 说明 |
-            |---|---|
-            | `AutoClicker.exe` | 单文件免安装版，双击即用（启动需解压，约慢 1~2 秒） |
-            | `AutoClicker-portable.zip` | 文件夹版，解压后运行 `AutoClicker.exe`，启动更快，适合常驻使用 |
+            ### Minimal（极简版）
+            三件套：间隔 / 启停 / 状态灯。F6 全局热键、托盘常驻、配置自动保存，单文件零依赖。
 
-            要求：Windows 10 / 11（64 位），由 GitHub Actions 自动编译。
-
-            ### 功能
-
-            - 全局热键启停，热键可自定义（默认 `F6`）
-            - 点击间隔 1ms ~ 60s，支持随机浮动 ±N%
-            - 左键 / 右键 / 中键，支持单击 / 双击 / 按住模式
-            - 位置模式：跟随鼠标 / 固定坐标 / 多点循环
-            - 可设点击总次数，到数自动停止
-            - 倒计时启动、配置自动保存、系统托盘、窗口置顶
-            - 高精度计时（Windows 定时器精度 1ms + 忙等待校准）
+            ### Pro（精美版）
+            深色圆角界面、自定义标题栏与状态灯呼吸动画；完整功能：随机浮动、单双击/按住、
+            固定坐标/多点循环、次数限制、倒计时启动、可自定义热键、窗口置顶、托盘。
+            需要 .NET Framework 4.8（Windows 10 1903+ / Windows 11 自带）。
 
             ### 注意
+            PyInstaller 打包的 exe 可能被杀毒软件误报，加入白名单即可；Minimal / Pro 为原生
+            编译，误报概率低得多。
 
-            PyInstaller 打包的 exe 可能被杀毒软件误报，加入白名单即可；介意的话可用文件夹版或直接从源码运行。
-
-            本工具仅用于个人合法的重复性操作辅助（如软件测试、表单填写、数据录入等）。请遵守目标软件/平台的服务条款，不要用于游戏作弊或违反规则与法律的场景。
+            本工具仅用于个人合法的重复性操作辅助（如软件测试、表单填写、数据录入等）。
+            请遵守目标软件/平台的服务条款，不要用于游戏作弊或违反规则与法律的场景。
           files: |
             dist/onefile/AutoClicker.exe
             dist/AutoClicker-portable.zip
+            dist/AutoClicker-Minimal.exe
+            dist/AutoClicker-Pro.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

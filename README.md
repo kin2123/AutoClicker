@@ -31,10 +31,26 @@
 
 前往 [**Releases**](https://github.com/kin2123/AutoClicker/releases/latest) 页面下载(由 GitHub Actions 自动编译,免安装):
 
-| 版本 | 说明 |
-|---|---|
-| `AutoClicker.exe` | 单文件免安装版,双击即用(启动需解压,约慢 1~2 秒) |
-| `AutoClicker-portable.zip` | 文件夹版,启动更快,适合常驻使用 |
+| 文件 | 版本 | 体积 | 适合 |
+|---|---|---|---|
+| `AutoClicker-Minimal.exe` | C + Win32 | ≈50 KB | 极致简约,打开就用 |
+| `AutoClicker-Pro.exe` | C# WPF (.NET 4.8) | <1 MB | 精美界面,全功能 |
+| `AutoClicker.exe` | Python + Tkinter | ≈18 MB | 功能最全的经典版 |
+| `AutoClicker-portable.zip` | Python 文件夹版 | ≈18 MB | 启动更快的经典版 |
+
+### Minimal(极简版)
+
+三件套:间隔 / 启停 / 状态灯。F6 全局热键、托盘常驻、配置自动保存,单文件零依赖。
+
+![Minimal](docs/screenshot-minimal.png)
+
+### Pro(精美版)
+
+深色圆角界面、自定义标题栏、状态灯呼吸动画;完整功能:随机浮动、单双击/按住、固定坐标/多点循环、次数限制、倒计时启动、可自定义热键、窗口置顶、托盘。
+
+需要 .NET Framework 4.8(Windows 10 1903+ / Windows 11 自带,无需安装)。
+
+![Pro](docs/screenshot-pro.png)
 
 ## 从源码运行
 
@@ -56,10 +72,26 @@ pyinstaller --onefile --noconsole --icon app.ico --add-data "app.ico;." --versio
 pyinstaller --noconsole --icon app.ico --add-data "app.ico;." --version-file version_info.txt --name AutoClicker auto_clicker.py
 ```
 
-也可以直接推 tag,GitHub Actions 会自动编译并发布 Release(见 `.github/workflows/release.yml`):
+也可以直接推 tag,GitHub Actions 会自动编译三个版本并发布 Release(见 `.github/workflows/release.yml`):
 
 ```bash
 git tag v1.3 && git push origin v1.3
+```
+
+### Minimal 版源码构建(C)
+
+```bash
+cd apps/minimal
+gcc -O2 -s -mwindows -municode -o AutoClicker-Minimal.exe main.c res.o -lshell32 -lwinmm
+# res.o 由 windres app.rc -O coff -o res.o 生成
+```
+
+### Pro 版源码构建(C#)
+
+```bash
+cd apps/elegant
+dotnet build -c Release
+# 产物: bin/Release/net48/AutoClicker-Pro.exe
 ```
 
 ## 使用说明

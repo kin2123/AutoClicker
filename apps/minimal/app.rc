@@ -1,0 +1,29 @@
+#include <windows.h>
+
+APPICON ICON "../../app.ico"
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "080404b0"
+    BEGIN
+      VALUE "CompanyName", "kin2123"
+      VALUE "FileDescription", "AutoClicker Minimal 极简连点器"
+      VALUE "FileVersion", "1.0.0.0"
+      VALUE "InternalName", "AutoClicker-Minimal"
+      VALUE "OriginalFilename", "AutoClicker-Minimal.exe"
+      VALUE "ProductName", "AutoClicker Minimal"
+      VALUE "ProductVersion", "1.0.0.0"
+      VALUE "LegalCopyright", "MIT License"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x804, 1200
+  END
+END
